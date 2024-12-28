@@ -1,6 +1,17 @@
+#include <assert.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#ifdef __unix__
+#define DELIM ":"
+#elif defined(_WIN32) || defined(WIN32)
+#define DELIM ";"
+#else
+#define DELIM ":"
+#endif
 
 const char *builtins[] = {"echo", "exit", "type", NULL};
 
@@ -28,7 +39,26 @@ void command_type(char *arguments) {
       return;
     }
   }
+  char *path_env = getenv("PATH");
+  if (path_env == NULL) {
+    printf("%s: not found", arguments);
+    return;
+  }
+  char *path = strdup(path_env);
+  char *split = strtok(path, DELIM);
+  char abs_path[256];
+  while (split != NULL) {
+    sprintf(abs_path, "%s/%s", split, arguments);
+    if (access(abs_path, F_OK) == 0 && access(abs_path, X_OK) == 0) {
+      printf("%s is %s", arguments, abs_path);
+      free(path);
+      return;
+    }
+    memset(abs_path, 0, sizeof(abs_path));
+    split = strtok(NULL, DELIM);
+  }
   printf("%s: not found", arguments);
+  free(path);
 }
 
 int main() {
