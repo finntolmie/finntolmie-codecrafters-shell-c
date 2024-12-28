@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-const char *builtins[] = {"echo", "exit", NULL};
+const char *builtins[] = {"echo", "exit", "type", NULL};
 
 void command_exit(char *arguments) {
   if (arguments == NULL || arguments[0] == '\0')
