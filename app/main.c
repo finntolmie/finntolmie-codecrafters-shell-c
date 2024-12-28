@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #ifdef __unix__
@@ -70,6 +72,62 @@ void command_type(char *type_args) {
     printf("%s: not found", exe_name);
 }
 
+void command_execute(char *arguments) {
+  char *exe_name = strtok(arguments, " ");
+  char *exe_args = strtok(NULL, " ");
+
+  char *path_env = getenv("PATH");
+  if (path_env == NULL) {
+    printf("%s: not found\n", exe_name);
+    return;
+  }
+
+  char abs_path[256];
+  char *path = strdup(path_env);
+  int found = get_executable(abs_path, path, exe_name);
+  free(path);
+
+  size_t argc = 1;
+  const char *argi = exe_args;
+  while (argi != NULL && *argi != '\0') {
+    if (*argi == ' ')
+      argc++;
+    argi++;
+  }
+
+  char **argv = malloc((argc + 1) * sizeof(char *));
+  if (argv == NULL) {
+    perror("malloc");
+    return;
+  }
+
+  argv[0] = exe_name;
+
+  char *tok = strtok(exe_args, " ");
+  int i;
+  for (i = 1; i < argc + 1 && tok != NULL; i++) {
+    argv[i] = tok;
+    tok = strtok(NULL, " ");
+  }
+  argv[i] = NULL;
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    execv(abs_path, argv);
+    perror("execv");
+    free(argv);
+    return;
+  } else if (pid == -1) {
+    perror("fork");
+    free(argv);
+    return;
+  } else {
+    int status;
+    waitpid(pid, &status, 0);
+  }
+  free(argv);
+}
+
 int main() {
   char input[100];
   while (1) {
@@ -83,8 +141,10 @@ int main() {
       command_echo(input + sizeof("echo"));
     else if (strncmp(input, "type", sizeof("type") - 1) == 0)
       command_type(input + sizeof("type"));
-    else
-      printf("%s: command not found", input);
+    else {
+      command_execute(input);
+      continue;
+    }
     printf("\n");
   }
   return 0;
