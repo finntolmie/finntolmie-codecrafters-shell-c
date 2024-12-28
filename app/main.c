@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,10 +57,66 @@ char *find_in_path(const char *cmd) {
   return NULL;
 }
 
-void exec_cmd(char *abs_path, int argc, char **argv) {
-  // printf("%s\n", abs_path);
-  // for (int i = 0; i < argc; i++)
-  //   printf("%s\n", argv[i]);
+// args could look like:
+// arg1 arg2 arg3 => 3 args
+// or
+// arg1 'arg 2' arg3 => 3 args
+// or
+// 'arg1 arg2 arg3' => 1 arg
+// will return a string array with the last element being NULL
+char **parse_args(const char *args) {
+  if (args == NULL)
+    return NULL;
+
+  size_t buf_size = 10;
+  size_t argc = 0;
+  char **argv = malloc(buf_size * sizeof(char *));
+  if (argv == NULL) {
+    perror("malloc");
+    return NULL;
+  }
+
+  const char *ptr = args;
+  while (*ptr != '\0' && argc < buf_size) {
+    while (isspace((unsigned char)*ptr))
+      ptr++;
+    if (*ptr == '\0')
+      break;
+
+    int is_single_quote = *ptr == '\'';
+    if (is_single_quote)
+      ptr++;
+
+    const char *start = ptr;
+    while (*ptr != '\0' &&
+           ((is_single_quote && *ptr != '\'') ||
+            (!is_single_quote && !isspace((unsigned char)*ptr)))) {
+      ptr++;
+    }
+
+    size_t arglen = ptr - start;
+    if (is_single_quote && *ptr == '\'')
+      ptr++;
+    char *arg = malloc(arglen + 1);
+    if (arg == NULL) {
+      perror("malloc");
+      goto parse_error;
+    }
+    strncpy(arg, start, arglen);
+    arg[arglen] = '\0';
+    argv[argc++] = arg;
+  }
+  argv[argc] = NULL;
+  return argv;
+
+parse_error:
+  for (size_t i = 0; i < argc; i++)
+    free(argv[i]);
+  free(argv);
+  return NULL;
+}
+
+void exec_cmd(char *abs_path, char **argv) {
   pid_t pid = fork();
   if (pid == 0) {
     execv(abs_path, argv);
@@ -85,7 +142,17 @@ void command_exit(char *arguments) {
 void command_echo(char *arguments) {
   if (arguments == NULL || arguments[0] == '\0')
     return;
-  printf("%s\n", arguments);
+  char **argv = parse_args(arguments);
+  int first = 1;
+  for (char **args = argv; *args != NULL; args++) {
+    if (!first)
+      printf(" ");
+    printf("%s", *args);
+    free(*args);
+    first = 0;
+  }
+  printf("\n");
+  free(argv);
 }
 
 void command_cd(char *arguments) {
@@ -132,21 +199,17 @@ void command_type(char *type_args) {
 }
 
 void command_execute(char *arguments) {
-  char *argv[10];
-  int argc = 0;
-  char *tok = strtok(arguments, " ");
-  while (tok != NULL && argc < 10) {
-    argv[argc++] = tok;
-    tok = strtok(NULL, " ");
-  }
-  argv[argc] = NULL;
-
+  char **argv = parse_args(arguments);
   char *cmd_path = find_in_path(argv[0]);
   if (cmd_path) {
-    exec_cmd(cmd_path, argc, argv);
+    exec_cmd(cmd_path, argv);
   } else {
     printf("%s: command not found\n", argv[0]);
   }
+  for (char **args = argv; *args != NULL; args++) {
+    free(*args);
+  }
+  free(argv);
 }
 
 void command_pwd() {
