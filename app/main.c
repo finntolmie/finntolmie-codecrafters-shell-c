@@ -16,6 +16,8 @@
 #define DELIM ":"
 #endif
 
+#define BUFFER_SIZE 256
+
 const char *builtins[] = {"echo", "exit", "type", "pwd", "cd", NULL};
 
 int get_executable(char *dst, char *path, char *fname) {
@@ -87,6 +89,23 @@ void command_echo(char *arguments) {
 }
 
 void command_cd(char *arguments) {
+  if (arguments[0] == '~') {
+    char *home = getenv("HOME");
+    if (home == NULL) {
+      printf("cd: %s: No such file or directory\n", arguments);
+      return;
+    }
+    int homelen = strlen(home);
+    int arglen = strlen(arguments);
+    int size = homelen + arglen - 1;
+    if (size >= BUFFER_SIZE) {
+      printf("cd: %s: No such file or directory\n", arguments);
+      return;
+    }
+    memmove(arguments + homelen, arguments + 1, arglen);
+    memcpy(arguments, home, homelen);
+    arguments[homelen + arglen - 1] = '\0';
+  }
   struct stat sb;
   if (stat(arguments, &sb) == 0 && S_ISDIR(sb.st_mode)) {
     chdir(arguments);
@@ -146,7 +165,7 @@ void clean_input(char *input, int buffer_size) {
 }
 
 int main() {
-  char input[100];
+  char input[BUFFER_SIZE];
   while (1) {
     printf("$ ");
     fflush(stdout);
