@@ -15,7 +15,7 @@
 #define DELIM ":"
 #endif
 
-const char *builtins[] = {"echo", "exit", "type", NULL};
+const char *builtins[] = {"echo", "exit", "type", "pwd", NULL};
 
 int get_executable(char *dst, char *path, char *fname) {
   char *split = strtok(path, DELIM);
@@ -120,6 +120,12 @@ void command_execute(char *arguments) {
   }
 }
 
+void command_pwd() {
+  char cwd[1024];
+  getcwd(cwd, sizeof(cwd));
+  printf("%s\n", cwd);
+}
+
 void clean_input(char *input, int buffer_size) {
   if (fgets(input, buffer_size, stdin) != NULL) {
     size_t len = strlen(input);
@@ -141,6 +147,8 @@ int main() {
       command_echo(input + sizeof("echo"));
     else if (strncmp(input, "type", sizeof("type") - 1) == 0)
       command_type(input + sizeof("type"));
+    else if (strncmp(input, "pwd", sizeof("pwd") - 1) == 0)
+      command_pwd();
     else {
       command_execute(input);
     }
