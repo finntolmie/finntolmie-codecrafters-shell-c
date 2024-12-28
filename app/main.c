@@ -40,7 +40,7 @@ void command_exit(char *arguments) {
 void command_echo(char *arguments) {
   if (arguments == NULL || arguments[0] == '\0')
     return;
-  printf("%s", arguments);
+  printf("%s\n", arguments);
 }
 
 void command_type(char *type_args) {
@@ -48,7 +48,7 @@ void command_type(char *type_args) {
     return;
   for (const char **cmd = builtins; *cmd != NULL; cmd++) {
     if (strcmp(*cmd, type_args) == 0) {
-      printf("%s is a shell builtin", *cmd);
+      printf("%s is a shell builtin\n", *cmd);
       return;
     }
   }
@@ -58,7 +58,7 @@ void command_type(char *type_args) {
 
   char *path_env = getenv("PATH");
   if (path_env == NULL) {
-    printf("%s: not found", exe_name);
+    printf("%s: not found\n", exe_name);
     return;
   }
 
@@ -67,9 +67,9 @@ void command_type(char *type_args) {
   int found = get_executable(abs_path, path, exe_name);
   free(path);
   if (found)
-    printf("%s is %s", exe_name, abs_path);
+    printf("%s is %s\n", exe_name, abs_path);
   else
-    printf("%s: not found", exe_name);
+    printf("%s: not found\n", exe_name);
 }
 
 void command_execute(char *arguments) {
@@ -86,6 +86,10 @@ void command_execute(char *arguments) {
   char *path = strdup(path_env);
   int found = get_executable(abs_path, path, exe_name);
   free(path);
+  if (!found) {
+    printf("%s: command not found\n", exe_name);
+    return;
+  }
 
   size_t argc = 1;
   const char *argi = exe_args;
@@ -143,9 +147,8 @@ int main() {
       command_type(input + sizeof("type"));
     else {
       command_execute(input);
-      continue;
     }
-    printf("\n");
+    fflush(stdout);
   }
   return 0;
 }
