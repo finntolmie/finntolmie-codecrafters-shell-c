@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -15,7 +16,7 @@
 #define DELIM ":"
 #endif
 
-const char *builtins[] = {"echo", "exit", "type", "pwd", NULL};
+const char *builtins[] = {"echo", "exit", "type", "pwd", "cd", NULL};
 
 int get_executable(char *dst, char *path, char *fname) {
   char *split = strtok(path, DELIM);
@@ -85,6 +86,15 @@ void command_echo(char *arguments) {
   printf("%s\n", arguments);
 }
 
+void command_cd(char *arguments) {
+  struct stat sb;
+  if (stat(arguments, &sb) == 0 && S_ISDIR(sb.st_mode)) {
+    chdir(arguments);
+  } else {
+    printf("cd: %s: No such file or directory\n", arguments);
+  }
+}
+
 void command_type(char *type_args) {
   if (type_args == NULL || type_args[0] == '\0')
     return;
@@ -145,6 +155,8 @@ int main() {
       command_exit(input + sizeof("exit"));
     else if (strncmp(input, "echo", sizeof("echo") - 1) == 0)
       command_echo(input + sizeof("echo"));
+    else if (strncmp(input, "cd", sizeof("cd") - 1) == 0)
+      command_cd(input + sizeof("cd"));
     else if (strncmp(input, "type", sizeof("type") - 1) == 0)
       command_type(input + sizeof("type"));
     else if (strncmp(input, "pwd", sizeof("pwd") - 1) == 0)
