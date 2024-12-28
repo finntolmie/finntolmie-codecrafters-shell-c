@@ -29,6 +29,48 @@ int get_executable(char *dst, char *path, char *fname) {
   return 0;
 }
 
+int is_executable(char *path) { return access(path, X_OK) == 0; }
+
+char *find_in_path(const char *cmd) {
+  char *path_env = getenv("PATH");
+
+  if (path_env == NULL)
+    return NULL;
+
+  char *path_copy = strdup(path_env);
+  char *dir = strtok(path_copy, DELIM);
+
+  static char full_path[1024];
+  while (dir != NULL) {
+    snprintf(full_path, sizeof(full_path), "%s/%s", dir, cmd);
+    if (is_executable(full_path)) {
+      free(path_copy);
+      return full_path;
+    }
+    dir = strtok(NULL, DELIM);
+  }
+  free(path_copy);
+  return NULL;
+}
+
+void exec_cmd(char *abs_path, int argc, char **argv) {
+  // printf("%s\n", abs_path);
+  // for (int i = 0; i < argc; i++)
+  //   printf("%s\n", argv[i]);
+  pid_t pid = fork();
+  if (pid == 0) {
+    execv(abs_path, argv);
+    perror("execv");
+    exit(1);
+  } else if (pid == -1) {
+    perror("fork");
+  } else {
+    int status;
+    if (waitpid(pid, &status, 0) == -1)
+      perror("waitpid");
+  }
+}
+
 void command_exit(char *arguments) {
   if (arguments == NULL || arguments[0] == '\0')
     exit(0);
@@ -52,84 +94,39 @@ void command_type(char *type_args) {
       return;
     }
   }
-
-  char *exe_name = strtok(type_args, " ");
-  char *exe_args = strtok(NULL, " ");
-
-  char *path_env = getenv("PATH");
-  if (path_env == NULL) {
-    printf("%s: not found\n", exe_name);
-    return;
-  }
-
-  char abs_path[256];
-  char *path = strdup(path_env);
-  int found = get_executable(abs_path, path, exe_name);
-  free(path);
-  if (found)
-    printf("%s is %s\n", exe_name, abs_path);
+  char *cmd = strtok(type_args, " ");
+  char *path = find_in_path(cmd);
+  if (path)
+    printf("%s is %s\n", cmd, path);
   else
-    printf("%s: not found\n", exe_name);
+    printf("%s: not found\n", cmd);
 }
 
 void command_execute(char *arguments) {
-  char *exe_name = strtok(arguments, " ");
-  char *exe_args = strtok(NULL, " ");
-
-  char *path_env = getenv("PATH");
-  if (path_env == NULL) {
-    printf("%s: not found\n", exe_name);
-    return;
-  }
-
-  char abs_path[256];
-  char *path = strdup(path_env);
-  int found = get_executable(abs_path, path, exe_name);
-  free(path);
-  if (!found) {
-    printf("%s: command not found\n", exe_name);
-    return;
-  }
-
-  size_t argc = 1;
-  const char *argi = exe_args;
-  while (argi != NULL && *argi != '\0') {
-    if (*argi == ' ')
-      argc++;
-    argi++;
-  }
-
-  char **argv = malloc((argc + 1) * sizeof(char *));
-  if (argv == NULL) {
-    perror("malloc");
-    return;
-  }
-
-  argv[0] = exe_name;
-
-  char *tok = strtok(exe_args, " ");
-  int i;
-  for (i = 1; i < argc + 1 && tok != NULL; i++) {
-    argv[i] = tok;
+  char *argv[10];
+  int argc = 0;
+  char *tok = strtok(arguments, " ");
+  while (tok != NULL && argc < 10) {
+    argv[argc++] = tok;
     tok = strtok(NULL, " ");
   }
-  argv[i] = NULL;
+  argv[argc] = NULL;
 
-  pid_t pid = fork();
-  if (pid == 0) {
-    execv(abs_path, argv);
-    perror("execv");
-    free(argv);
-    return;
-  } else if (pid == -1) {
-    perror("fork");
-    free(argv);
-    return;
+  char *cmd_path = find_in_path(argv[0]);
+  if (cmd_path) {
+    exec_cmd(cmd_path, argc, argv);
   } else {
-    int status;
-    waitpid(pid, &status, 0);
+    printf("%s: command not found\n", argv[0]);
   }
-  free(argv);
+}
+
+void clean_input(char *input, int buffer_size) {
+  if (fgets(input, buffer_size, stdin) != NULL) {
+    size_t len = strlen(input);
+    if (len > 0 && input[len - 1] == '\n') {
+      input[len - 1] = '\0';
+    }
+  }
 }
 
 int main() {
@@ -137,8 +134,7 @@ int main() {
   while (1) {
     printf("$ ");
     fflush(stdout);
-    fgets(input, 100, stdin);
-    input[strlen(input) - 1] = '\0';
+    clean_input(input, sizeof(input));
     if (strncmp(input, "exit", sizeof("exit") - 1) == 0)
       command_exit(input + sizeof("exit"));
     else if (strncmp(input, "echo", sizeof("echo") - 1) == 0)
