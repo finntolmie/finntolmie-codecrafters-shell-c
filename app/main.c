@@ -15,6 +15,18 @@
 
 const char *builtins[] = {"echo", "exit", "type", NULL};
 
+int get_executable(char *dst, char *path, char *fname) {
+  char *split = strtok(path, DELIM);
+  while (split != NULL) {
+    sprintf(dst, "%s/%s", split, fname);
+    if (access(dst, F_OK) == 0 && access(dst, X_OK) == 0) {
+      return 1;
+    }
+    split = strtok(NULL, DELIM);
+  }
+  return 0;
+}
+
 void command_exit(char *arguments) {
   if (arguments == NULL || arguments[0] == '\0')
     exit(0);
@@ -29,36 +41,33 @@ void command_echo(char *arguments) {
   printf("%s", arguments);
 }
 
-void command_type(char *arguments) {
-  if (arguments == NULL || arguments[0] == '\0')
+void command_type(char *type_args) {
+  if (type_args == NULL || type_args[0] == '\0')
     return;
-  // check builtins first
   for (const char **cmd = builtins; *cmd != NULL; cmd++) {
-    if (strcmp(*cmd, arguments) == 0) {
+    if (strcmp(*cmd, type_args) == 0) {
       printf("%s is a shell builtin", *cmd);
       return;
     }
   }
+
+  char *exe_name = strtok(type_args, " ");
+  char *exe_args = strtok(NULL, " ");
+
   char *path_env = getenv("PATH");
   if (path_env == NULL) {
-    printf("%s: not found", arguments);
+    printf("%s: not found", exe_name);
     return;
   }
-  char *path = strdup(path_env);
-  char *split = strtok(path, DELIM);
+
   char abs_path[256];
-  while (split != NULL) {
-    sprintf(abs_path, "%s/%s", split, arguments);
-    if (access(abs_path, F_OK) == 0 && access(abs_path, X_OK) == 0) {
-      printf("%s is %s", arguments, abs_path);
-      free(path);
-      return;
-    }
-    memset(abs_path, 0, sizeof(abs_path));
-    split = strtok(NULL, DELIM);
-  }
-  printf("%s: not found", arguments);
+  char *path = strdup(path_env);
+  int found = get_executable(abs_path, path, exe_name);
   free(path);
+  if (found)
+    printf("%s is %s", exe_name, abs_path);
+  else
+    printf("%s: not found", exe_name);
 }
 
 int main() {
