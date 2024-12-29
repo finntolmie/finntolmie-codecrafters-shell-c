@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +20,14 @@
 #endif
 
 #define BUFFER_SIZE 256
+#define MAX_ARG_COUNT 24
+
+char **argv;
+
+struct redirection {
+  int out_fd;
+  int err_fd;
+};
 
 const char *builtins[] = {"echo", "exit", "type", "pwd", "cd", NULL};
 
@@ -68,7 +78,7 @@ char **parse_args(const char *args) {
   if (args == NULL)
     return NULL;
 
-  size_t buf_size = 10;
+  size_t buf_size = MAX_ARG_COUNT;
   size_t argc = 0;
   char **argv = malloc(buf_size * sizeof(char *));
   if (argv == NULL) {
@@ -135,114 +145,228 @@ char **parse_args(const char *args) {
   return argv;
 
 parse_error:
-  for (size_t i = 0; i < argc; i++)
-    free(argv[i]);
+  for (char **args = argv; *args != NULL; args++)
+    free(*args);
   free(argv);
   return NULL;
 }
 
-void exec_cmd(char *abs_path, char **argv) {
-  // for (char **args = argv; *args != NULL; args++)
-  //   printf("arg: %s\n", *args);
-  pid_t pid = fork();
+char **parse_stdout_redirects(char **argv) {
+  char **redirects = malloc((MAX_ARG_COUNT / 2) * sizeof(char *));
+  if (redirects == NULL) {
+    perror("malloc");
+    return NULL;
+  }
+  int i = 0;
+  int arglen = 0;
+  while (argv[i] != NULL) {
+    if (strcmp(argv[i++], "1>") != 0 || strcmp(argv[i++], ">") != 0)
+      continue;
+    if (argv[i] == NULL)
+      break;
+
+    redirects[arglen++] = strdup(argv[i]);
+    if (redirects[arglen - 1] == NULL) {
+      perror("strdup");
+      for (int j = 0; j < arglen; j++)
+        free(redirects[j]);
+      free(redirects);
+      return NULL;
+    }
+    free(argv[i - 1]);
+    free(argv[i]);
+    int j = i - 1;
+    while (argv[j + 2] != NULL) {
+      argv[j] = argv[j + 2];
+      j++;
+    }
+    argv[j] = NULL;
+    argv[j + 1] = NULL;
+  }
+  redirects[arglen] = NULL;
+  return redirects;
+}
+
+void exec_cmd(char **argv) {
+  pid_t pid, wpid;
+  int status;
+  if (argv[0] == NULL)
+    return;
+  if (find_in_path(argv[0]) == NULL) {
+    fprintf(stderr, "%s: command not found\n", argv[0]);
+    return;
+  }
+  pid = fork();
   if (pid == 0) {
-    execv(abs_path, argv);
-    perror("execv");
-    exit(1);
-  } else if (pid == -1) {
-    perror("fork");
+    if (execvp(argv[0], argv) == -1) {
+      perror("launch");
+    }
+    exit(EXIT_FAILURE);
+  } else if (pid < 0) {
+    perror("launch");
   } else {
-    int status;
-    if (waitpid(pid, &status, 0) == -1)
-      perror("waitpid");
+    do {
+      wpid = waitpid(pid, &status, WUNTRACED);
+    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
   }
 }
 
-void command_exit(char *arguments) {
-  if (arguments == NULL || arguments[0] == '\0')
-    exit(0);
-
-  int exit_code = atoi(arguments);
-  exit(exit_code);
-}
-
-void command_echo(char *arguments) {
-  if (arguments == NULL || arguments[0] == '\0')
-    return;
-  char **argv = parse_args(arguments);
+void command_echo(char **argv) {
+  char **argstdout;
   int first = 1;
+  // skip echo
+  argv++;
   for (char **args = argv; *args != NULL; args++) {
     if (!first)
       printf(" ");
     printf("%s", *args);
-    free(*args);
     first = 0;
   }
   printf("\n");
-  free(argv);
 }
 
-void command_cd(char *arguments) {
-  if (arguments[0] == '~') {
+char *replaceWord(const char *s, const char *oldW, const char *newW) {
+  char *result;
+  int i, cnt = 0;
+  int newWlen = strlen(newW);
+  int oldWlen = strlen(oldW);
+  for (i = 0; s[i] != '\0'; i++) {
+    if (strstr(&s[i], oldW) == &s[i]) {
+      cnt++;
+      i += oldWlen - 1;
+    }
+  }
+  result = (char *)malloc(i + cnt * (newWlen - oldWlen) + 1);
+  i = 0;
+  while (*s) {
+    if (strstr(s, oldW) == s) {
+      strcpy(&result[i], newW);
+      i += newWlen;
+      s += oldWlen;
+    } else
+      result[i++] = *s++;
+  }
+  result[i] = '\0';
+  return result;
+}
+
+void command_cd(char **argv) {
+  if (argv[1] == NULL) {
+    fprintf(stderr, "Error: expected argument to cd\n");
+    return;
+  }
+  if (strncmp(argv[1], "~", 2) == 0) {
     char *home = getenv("HOME");
     if (home == NULL) {
-      printf("cd: %s: No such file or directory\n", arguments);
-      return;
+      fprintf(stderr, "Error: $HOME is not set\n");
     }
-    int homelen = strlen(home);
-    int arglen = strlen(arguments);
-    int size = homelen + arglen - 1;
-    if (size >= BUFFER_SIZE) {
-      printf("cd: %s: No such file or directory\n", arguments);
-      return;
-    }
-    memmove(arguments + homelen, arguments + 1, arglen);
-    memcpy(arguments, home, homelen);
-    arguments[homelen + arglen - 1] = '\0';
-  }
-  struct stat sb;
-  if (stat(arguments, &sb) == 0 && S_ISDIR(sb.st_mode)) {
-    chdir(arguments);
-  } else {
-    printf("cd: %s: No such file or directory\n", arguments);
+    char *path = replaceWord("~", argv[1], home);
+    chdir(path);
+  } else if (chdir(argv[1]) != 0) {
+    fprintf(stderr, "cd: %s: No such file or directory\n", argv[1]);
   }
 }
 
-void command_type(char *type_args) {
-  if (type_args == NULL || type_args[0] == '\0')
+void command_type(char **argv) {
+  if (argv[1] == NULL) {
+    fprintf(stderr, "Error: expected argument\n");
     return;
+  }
   for (const char **cmd = builtins; *cmd != NULL; cmd++) {
-    if (strcmp(*cmd, type_args) == 0) {
-      printf("%s is a shell builtin\n", *cmd);
+    if (strcmp(*cmd, argv[1]) == 0) {
+      printf("%s is a shell builtin\n", argv[1]);
       return;
     }
   }
-  char *cmd = strtok(type_args, " ");
-  char *path = find_in_path(cmd);
-  if (path)
-    printf("%s is %s\n", cmd, path);
-  else
-    printf("%s: not found\n", cmd);
+  char *path = find_in_path(argv[1]);
+  if (path) {
+    printf("%s is %s\n", argv[1], path);
+  } else {
+    printf("%s: not found\n", argv[1]);
+  }
 }
 
-void command_execute(char *arguments) {
-  char **argv = parse_args(arguments);
+void command_execute(char **argv) {
   char *cmd_path = find_in_path(argv[0]);
   if (cmd_path) {
-    exec_cmd(cmd_path, argv);
+    exec_cmd(argv);
   } else {
-    printf("%s: command not found\n", argv[0]);
+    fprintf(stderr, "%s: command not found\n", argv[0]);
   }
-  for (char **args = argv; *args != NULL; args++) {
-    free(*args);
-  }
-  free(argv);
 }
 
 void command_pwd() {
   char cwd[1024];
   getcwd(cwd, sizeof(cwd));
   printf("%s\n", cwd);
+}
+
+char **handle_redirection(char **args, struct redirection *redir) {
+  char **new_args = malloc(sizeof(char *) * BUFSIZ);
+  if (args[0] == NULL) {
+    return NULL;
+  }
+  int i = 0, j = 0;
+  while (args[i] != NULL) {
+    if (strcmp(args[i], ">") == 0 || strcmp(args[i], "1>") == 0 ||
+        strcmp(args[i], ">>") == 0 || strcmp(args[i], "1>>") == 0) {
+      if (args[i + 1] == NULL) {
+        fprintf(stderr, "Error: expected filename/stream after >\n");
+        return NULL;
+      }
+      int flags = O_WRONLY | O_CREAT;
+      flags |= (strcmp(args[i], ">>") == 0 || strcmp(args[i], "1>>") == 0)
+                   ? O_APPEND
+                   : O_TRUNC;
+      redir->out_fd = open(args[i + 1], flags, 0644);
+      if (redir->out_fd == -1) {
+        perror("open");
+        return NULL;
+      }
+      i += 2; // advance past the redirection
+      continue;
+    }
+    if (strcmp(args[i], "2>") == 0 || strcmp(args[i], "2>>") == 0) {
+      if (args[i + 1] == NULL) {
+        fprintf(stderr, "Error: expected filename/stream after >\n");
+        return NULL;
+      }
+      int flags = O_WRONLY | O_CREAT;
+      flags |= (strcmp(args[i], "2>>") == 0) ? O_APPEND : O_TRUNC;
+      redir->err_fd = open(args[i + 1], flags, 0644);
+      if (redir->err_fd == -1) {
+        perror("open");
+        return NULL;
+      }
+      i += 2; // advance past the redirection
+      continue;
+    }
+    new_args[j++] = strdup(args[i++]);
+  }
+  new_args[j] = NULL;
+  return new_args;
+}
+
+void restore_redirection(struct redirection *red, int saved_stdout,
+                         int saved_stderr) {
+  if (red->out_fd != -1) {
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(red->out_fd);
+    close(saved_stdout);
+  }
+  if (red->err_fd != -1) {
+    dup2(saved_stderr, STDOUT_FILENO);
+    close(red->err_fd);
+    close(saved_stderr);
+  }
+}
+
+int has_redirection(char **args) {
+  for (int i = 0; args[i] != NULL; i++) {
+    if (strstr(args[i], ">") != NULL)
+      return 1;
+  }
+  return 0;
 }
 
 void clean_input(char *input, int buffer_size) {
@@ -256,23 +380,60 @@ void clean_input(char *input, int buffer_size) {
 
 int main() {
   char input[BUFFER_SIZE];
-  while (1) {
+  int exit_no = -1;
+  while (exit_no == -1) {
+    struct redirection redir = {-1, -1};
+    int saved_stdout = -1;
+    int saved_stderr = -1;
     printf("$ ");
     fflush(stdout);
     clean_input(input, sizeof(input));
-    if (strncmp(input, "exit", sizeof("exit") - 1) == 0)
-      command_exit(input + sizeof("exit"));
-    else if (strncmp(input, "echo", sizeof("echo") - 1) == 0)
-      command_echo(input + sizeof("echo"));
-    else if (strncmp(input, "cd", sizeof("cd") - 1) == 0)
-      command_cd(input + sizeof("cd"));
-    else if (strncmp(input, "type", sizeof("type") - 1) == 0)
-      command_type(input + sizeof("type"));
-    else if (strncmp(input, "pwd", sizeof("pwd") - 1) == 0)
+    argv = parse_args(input);
+    if (argv[0] == NULL) {
+      fflush(stdout);
+      continue;
+    }
+    char **cmd_args = argv;
+    if (has_redirection(argv)) {
+      cmd_args = handle_redirection(argv, &redir);
+      if (cmd_args == NULL) {
+        fflush(stdout);
+        continue;
+      }
+      if (redir.out_fd != -1) {
+        saved_stdout = dup(STDOUT_FILENO);
+        dup2(redir.out_fd, STDOUT_FILENO);
+      }
+      if (redir.err_fd != -1) {
+        saved_stderr = dup(STDERR_FILENO);
+        dup2(redir.err_fd, STDERR_FILENO);
+      }
+    }
+    if (strcmp(cmd_args[0], "exit") == 0) {
+      if (cmd_args[1] == NULL)
+        exit_no = 0;
+      else
+        exit_no = atoi(cmd_args[1]);
+    } else if (strcmp(cmd_args[0], "echo") == 0)
+      command_echo(cmd_args);
+    else if (strcmp(cmd_args[0], "cd") == 0)
+      command_cd(cmd_args);
+    else if (strcmp(cmd_args[0], "type") == 0)
+      command_type(cmd_args);
+    else if (strcmp(cmd_args[0], "pwd") == 0)
       command_pwd();
     else {
-      command_execute(input);
+      command_execute(cmd_args);
     }
+    restore_redirection(&redir, saved_stdout, saved_stderr);
+    if (cmd_args != argv) {
+      for (char **args = cmd_args; *args != NULL; args++)
+        free(*args);
+      free(cmd_args);
+    }
+    for (char **args = argv; *args != NULL; args++)
+      free(*args);
+    free(argv);
     fflush(stdout);
   }
   return 0;
