@@ -77,17 +77,12 @@ char **parse_args(const char *args) {
   }
 
   const char *ptr = args;
+  char quote_char;
   while (*ptr != '\0' && argc < buf_size) {
     while (isspace((unsigned char)*ptr))
       ptr++;
     if (*ptr == '\0')
       break;
-
-    char quote_char = '\0';
-    if (*ptr == '\'' || *ptr == '"') {
-      quote_char = *ptr;
-      ptr++;
-    }
 
     const char *start = ptr;
     char *arg = malloc(1024);
@@ -96,6 +91,13 @@ char **parse_args(const char *args) {
       goto parse_error;
     }
     size_t arglen = 0;
+  restart:
+    quote_char = '\0';
+    if (*ptr == '\'' || *ptr == '"') {
+      quote_char = *ptr;
+      ptr++;
+    }
+
     while (*ptr != '\0' && ((quote_char && *ptr != quote_char) ||
                             (!quote_char && !isspace((unsigned char)*ptr)))) {
       if (*ptr == '\\' && !quote_char) {
@@ -103,11 +105,23 @@ char **parse_args(const char *args) {
         if (*ptr == '\0')
           break;
       }
+      if (*ptr == '\\' && quote_char == '"') {
+        char peek = ptr[1];
+        if (peek == '\\' || peek == '$' || peek == '"') {
+          ptr++;
+          if (*ptr == '\0')
+            break;
+        }
+      }
       arg[arglen++] = *ptr++;
     }
 
-    if (quote_char && *ptr == quote_char)
+    if (quote_char && *ptr == quote_char) {
       ptr++;
+      // disgusting hack
+      if (!isspace((unsigned char)*ptr))
+        goto restart;
+    }
 
     arg = realloc(arg, arglen + 1);
     if (arg == NULL) {
@@ -128,6 +142,8 @@ parse_error:
 }
 
 void exec_cmd(char *abs_path, char **argv) {
+  // for (char **args = argv; *args != NULL; args++)
+  //   printf("arg: %s\n", *args);
   pid_t pid = fork();
   if (pid == 0) {
     execv(abs_path, argv);
