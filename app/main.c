@@ -151,42 +151,6 @@ parse_error:
   return NULL;
 }
 
-char **parse_stdout_redirects(char **argv) {
-  char **redirects = malloc((MAX_ARG_COUNT / 2) * sizeof(char *));
-  if (redirects == NULL) {
-    perror("malloc");
-    return NULL;
-  }
-  int i = 0;
-  int arglen = 0;
-  while (argv[i] != NULL) {
-    if (strcmp(argv[i++], "1>") != 0 || strcmp(argv[i++], ">") != 0)
-      continue;
-    if (argv[i] == NULL)
-      break;
-
-    redirects[arglen++] = strdup(argv[i]);
-    if (redirects[arglen - 1] == NULL) {
-      perror("strdup");
-      for (int j = 0; j < arglen; j++)
-        free(redirects[j]);
-      free(redirects);
-      return NULL;
-    }
-    free(argv[i - 1]);
-    free(argv[i]);
-    int j = i - 1;
-    while (argv[j + 2] != NULL) {
-      argv[j] = argv[j + 2];
-      j++;
-    }
-    argv[j] = NULL;
-    argv[j + 1] = NULL;
-  }
-  redirects[arglen] = NULL;
-  return redirects;
-}
-
 void exec_cmd(char **argv) {
   pid_t pid, wpid;
   int status;
