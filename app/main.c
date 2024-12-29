@@ -90,20 +90,30 @@ char **parse_args(const char *args) {
     }
 
     const char *start = ptr;
-    while (*ptr != '\0' && ((quote_char && *ptr != quote_char) ||
-                            (!quote_char && !isspace((unsigned char)*ptr)))) {
-      ptr++;
-    }
-
-    size_t arglen = ptr - start;
-    if (quote_char && *ptr == quote_char)
-      ptr++;
-    char *arg = malloc(arglen + 1);
+    char *arg = malloc(1024);
     if (arg == NULL) {
       perror("malloc");
       goto parse_error;
     }
-    strncpy(arg, start, arglen);
+    size_t arglen = 0;
+    while (*ptr != '\0' && ((quote_char && *ptr != quote_char) ||
+                            (!quote_char && !isspace((unsigned char)*ptr)))) {
+      if (*ptr == '\\' && !quote_char) {
+        ptr++;
+        if (*ptr == '\0')
+          break;
+      }
+      arg[arglen++] = *ptr++;
+    }
+
+    if (quote_char && *ptr == quote_char)
+      ptr++;
+
+    arg = realloc(arg, arglen + 1);
+    if (arg == NULL) {
+      perror("realloc");
+      goto parse_error;
+    }
     arg[arglen] = '\0';
     argv[argc++] = arg;
   }
