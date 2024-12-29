@@ -83,19 +83,20 @@ char **parse_args(const char *args) {
     if (*ptr == '\0')
       break;
 
-    int is_single_quote = *ptr == '\'';
-    if (is_single_quote)
+    char quote_char = '\0';
+    if (*ptr == '\'' || *ptr == '"') {
+      quote_char = *ptr;
       ptr++;
+    }
 
     const char *start = ptr;
-    while (*ptr != '\0' &&
-           ((is_single_quote && *ptr != '\'') ||
-            (!is_single_quote && !isspace((unsigned char)*ptr)))) {
+    while (*ptr != '\0' && ((quote_char && *ptr != quote_char) ||
+                            (!quote_char && !isspace((unsigned char)*ptr)))) {
       ptr++;
     }
 
     size_t arglen = ptr - start;
-    if (is_single_quote && *ptr == '\'')
+    if (quote_char && *ptr == quote_char)
       ptr++;
     char *arg = malloc(arglen + 1);
     if (arg == NULL) {
