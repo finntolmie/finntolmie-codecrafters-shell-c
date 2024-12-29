@@ -323,7 +323,7 @@ char **handle_redirection(char **args, struct redirection *redir) {
         perror("open");
         return NULL;
       }
-      i += 2; // advance past the redirection
+      i += 2;
       continue;
     }
     if (strcmp(args[i], "2>") == 0 || strcmp(args[i], "2>>") == 0) {
@@ -338,7 +338,7 @@ char **handle_redirection(char **args, struct redirection *redir) {
         perror("open");
         return NULL;
       }
-      i += 2; // advance past the redirection
+      i += 2;
       continue;
     }
     new_args[j++] = strdup(args[i++]);
@@ -355,7 +355,7 @@ void restore_redirection(struct redirection *red, int saved_stdout,
     close(saved_stdout);
   }
   if (red->err_fd != -1) {
-    dup2(saved_stderr, STDOUT_FILENO);
+    dup2(saved_stderr, STDERR_FILENO);
     close(red->err_fd);
     close(saved_stderr);
   }
